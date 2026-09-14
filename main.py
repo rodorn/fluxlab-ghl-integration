@@ -11,6 +11,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -21,6 +22,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from sinks.sheet import build_sink
 from sinks.forward import Forwarder
+from ghl_client import GHLClient
+from security import signature_header_name, verify_signature
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -32,6 +35,7 @@ app = FastAPI(title="GHL Lead Integration", version="1.0.0")
 
 sink = build_sink()
 forwarder = Forwarder()
+ghl = GHLClient()
 
 
 class GHLLead(BaseModel):
@@ -89,13 +93,28 @@ def normalize(lead: GHLLead) -> dict[str, Any]:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "sink": sink.name}
+    return {"status": "ok", "sink": sink.name, "ghl_outbound": str(ghl.enabled)}
+
+
+@app.get("/leads")
+def leads(limit: int = 20) -> dict[str, Any]:
+    """Return the most recent stored leads (newest first) for quick inspection."""
+    limit = max(1, min(int(limit), 200))
+    items = sink.recent(limit)
+    return {"ok": True, "sink": sink.name, "count": len(items), "leads": items}
 
 
 @app.post("/webhook/ghl-lead")
 async def ghl_lead(request: Request) -> dict[str, Any]:
+    body = await request.body()
+
+    provided = request.headers.get(signature_header_name())
+    if not verify_signature(body, provided):
+        log.warning("rejected webhook: invalid or missing signature")
+        raise HTTPException(status_code=401, detail="invalid webhook signature")
+
     try:
-        raw = await request.json()
+        raw = json.loads(body) if body else None
     except Exception:
         raise HTTPException(status_code=400, detail="invalid JSON body")
 
@@ -115,16 +134,29 @@ async def ghl_lead(request: Request) -> dict[str, Any]:
         )
 
     record = normalize(lead)
+
+    if lead.contact_id and sink.exists(lead.contact_id):
+        log.info("duplicate lead contact_id=%s -> skipped", lead.contact_id)
+        return {
+            "ok": True,
+            "duplicate": True,
+            "stored_in": sink.name,
+            "contact_id": lead.contact_id,
+        }
+
     sink.write(record)
     log.info(
         "stored lead contact_id=%s email=%s", record["contact_id"], record["email"]
     )
 
     forward_result = forwarder.send(record)
+    ghl_result = ghl.upsert_contact(record)
 
     return {
         "ok": True,
+        "duplicate": False,
         "stored_in": sink.name,
         "record": record,
         "forwarded": forward_result,
+        "ghl_outbound": ghl_result,
     }

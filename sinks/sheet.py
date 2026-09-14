@@ -48,6 +48,18 @@ class LeadSink(ABC):
     @abstractmethod
     def write(self, record: dict[str, Any]) -> None: ...
 
+    def exists(self, contact_id: str) -> bool:
+        """Whether a lead with this contact_id was already stored.
+
+        Default is False: backends that cannot cheaply check simply never
+        report duplicates (idempotency is a best-effort optimization).
+        """
+        return False
+
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Most recent stored leads, newest first. Default: not supported."""
+        return []
+
 
 class CSVSink(LeadSink):
     name = "csv"
@@ -65,6 +77,19 @@ class CSVSink(LeadSink):
                 writer.writeheader()
             writer.writerow(row)
         log.info("csv append -> %s", self.path)
+
+    def _read_all(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        with self.path.open("r", newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+
+    def exists(self, contact_id: str) -> bool:
+        return any(r.get("contact_id") == contact_id for r in self._read_all())
+
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._read_all()
+        return list(reversed(rows[-limit:]))
 
 
 class SQLiteSink(LeadSink):
@@ -94,6 +119,21 @@ class SQLiteSink(LeadSink):
                 tuple(row.get(f) for f in FIELDNAMES),
             )
         log.info("sqlite insert -> %s", self.path)
+
+    def exists(self, contact_id: str) -> bool:
+        with sqlite3.connect(self.path) as conn:
+            cur = conn.execute(
+                "SELECT 1 FROM leads WHERE contact_id = ? LIMIT 1", (contact_id,)
+            )
+            return cur.fetchone() is not None
+
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                "SELECT * FROM leads ORDER BY id DESC LIMIT ?", (int(limit),)
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 class GSheetSink(LeadSink):

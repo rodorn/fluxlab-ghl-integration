@@ -65,13 +65,19 @@ The lead is appended to `data/leads.csv`. Health check: `GET /health`.
 
 Copy `.env.example` to `.env` (or export the vars). Key ones:
 
-| var                                   | meaning                       | default          |
-| ------------------------------------- | ----------------------------- | ---------------- |
-| `SINK`                                | `csv` \| `sqlite` \| `gsheet` | `csv`            |
-| `CSV_PATH` / `SQLITE_PATH`            | file location                 | `data/leads.*`   |
-| `FORWARD_URL`                         | external API to POST leads to | empty (disabled) |
-| `FORWARD_TOKEN`                       | bearer token for forwarding   | empty            |
-| `FORWARD_RETRIES` / `FORWARD_TIMEOUT` | resilience knobs              | `3` / `10`       |
+| var                                   | meaning                              | default                |
+| ------------------------------------- | ------------------------------------ | ---------------------- |
+| `SINK`                                | `csv` \| `sqlite` \| `gsheet`        | `csv`                  |
+| `CSV_PATH` / `SQLITE_PATH`            | file location                        | `data/leads.*`         |
+| `FORWARD_URL`                         | external API to POST leads to        | empty (disabled)       |
+| `FORWARD_TOKEN`                       | bearer token for forwarding          | empty                  |
+| `FORWARD_RETRIES` / `FORWARD_TIMEOUT` | resilience knobs                     | `3` / `10`             |
+| `WEBHOOK_SECRET`                      | HMAC secret for inbound verification | empty (disabled)       |
+| `WEBHOOK_SIGNATURE_HEADER`            | header carrying the signature        | `X-Webhook-Signature`  |
+| `GHL_API_KEY`                         | token for the outbound GHL push      | empty (disabled)       |
+| `GHL_LOCATION_ID`                     | default GHL sub-account id           | empty                  |
+| `GHL_API_BASE` / `GHL_API_VERSION`    | GHL API base and version header      | LeadConnector defaults |
+| `GHL_RETRIES` / `GHL_TIMEOUT`         | outbound resilience knobs            | `3` / `10`             |
 
 ## Connecting the real GHL webhook
 
@@ -88,7 +94,7 @@ Copy `.env.example` to `.env` (or export the vars). Key ones:
 
 > Tip: GHL's built-in webhook action sends a flat JSON object. Use the field
 > picker (`{{contact.email}}` etc.) to populate keys. The `custom_fields` block
-> can be sent either as an object or as GHL's `[{id, value}]` array — both are
+> can be sent either as an object or as GHL's `[{id, value}]` array, both are
 > handled.
 
 ## Switching to Google Sheets (gspread)
@@ -106,14 +112,65 @@ Copy `.env.example` to `.env` (or export the vars). Key ones:
 5. `pip install gspread` (already in requirements) and restart. On first run the
    worksheet is created with a header row if missing; each lead is appended.
 
+## Endpoints
+
+- `POST /webhook/ghl-lead` receives, validates, stores, forwards and (optionally)
+  pushes the lead back into GHL. Returns the normalized record and per-step results.
+- `GET /health` liveness plus the active sink and whether outbound GHL is enabled.
+- `GET /leads?limit=N` returns the most recent stored leads (newest first, capped at 200) for a quick eyeball of what has arrived. Handy in dev and demos.
+
+## Webhook signature verification
+
+Set `WEBHOOK_SECRET` to require a signature on every inbound request. The caller
+must send `HMAC-SHA256(secret, raw_request_body)` (hex, optionally `sha256=` prefixed)
+in the header named by `WEBHOOK_SIGNATURE_HEADER` (default `X-Webhook-Signature`).
+A missing or wrong signature is rejected with `401`. Comparison is constant-time.
+When `WEBHOOK_SECRET` is unset, verification is disabled so the service runs out of
+the box.
+
+GHL's native webhook action does not sign requests, so use this when you put a proxy,
+a middleware step, or your own relay in front, or point a signing caller at the endpoint.
+
+## Idempotency
+
+If a lead carries a `contact_id` that is already stored, the webhook returns
+`{"ok": true, "duplicate": true}` without writing a second row or re-firing the
+forward / outbound steps. This makes GHL retries and at-least-once delivery safe.
+Dedup is backed by the SQLite sink (and the CSV sink); backends that cannot check
+cheaply simply never report duplicates.
+
+## Pushing back into GHL (outbound, `ghl_client.py`)
+
+`ghl_client.GHLClient` talks to the GoHighLevel API v2 (LeadConnector) to
+`create_contact` / `update_contact` / `upsert_contact` from a normalized record,
+with bearer auth, the `Version` header, per-request timeout, and retry with
+exponential backoff on transient statuses (`429`, `5xx`, ...). Set `GHL_API_KEY`
+to enable it; without a key the push is a safe no-op. `upsert_contact` updates when
+the record has a `contact_id` and creates otherwise.
+
+## Running tests
+
+```bash
+.venv/bin/pip install -r requirements.txt   # includes pytest
+.venv/bin/pytest -q
+```
+
+The suite (`tests/`) covers payload validation and aliases, the missing-identity
+`422`, SQLite persistence, idempotent dedup, the `/leads` endpoint, HMAC signature
+verification (accept / reject / disabled), the forwarder no-op, and the outbound
+`ghl_client` against a mocked HTTP transport (no real key needed). CI runs the same
+suite on Python 3.12 via GitHub Actions (`.github/workflows/ci.yml`).
+
 ## Files
 
-- `main.py` — FastAPI app, validation, normalization, routing.
-- `sinks/sheet.py` — `LeadSink` interface + CSV / SQLite / gspread impls.
-- `sinks/forward.py` — external-API forwarder with retry/timeout.
-- `sample_payload.json` — realistic GHL lead payload.
-- `requirements.txt`, `.env.example`.
-
+- `main.py` FastAPI app, validation, normalization, routing.
+- `sinks/sheet.py` `LeadSink` interface plus CSV / SQLite / gspread impls (with dedup and recent-lead reads).
+- `sinks/forward.py` external-API forwarder with retry/timeout.
+- `ghl_client.py` outbound GoHighLevel API v2 client (create/update/upsert contact).
+- `security.py` optional HMAC signature verification for the inbound webhook.
+- `tests/` pytest suite.
+- `sample_payload.json` realistic GHL lead payload.
+- `requirements.txt`, `.env.example`, `.github/workflows/ci.yml`.
 
 ---
 
