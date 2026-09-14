@@ -1,0 +1,15 @@
+{
+  "contactId": "aBcD1234efGh5678",
+  "firstName": "Jan",
+  "lastName": "Kowalski",
+  "email": "jan.kowalski@example.com",
+  "phone": "+48501234567",
+  "source": "Facebook Lead Ad - Summer Promo",
+  "tags": ["new-lead", "fb-campaign"],
+  "locationId": "loc_9zXY87abcd",
+  "customFields": {
+    "budget": "5000-10000",
+    "service_interest": "website + automation",
+    "preferred_contact": "email"
+  }
+}
