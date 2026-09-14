@@ -73,3 +73,15 @@ _Typowe pakiety startowe: pojedynczy webhook flow (~$500–900), dwukierunkowa s
 Programista Python skupiony na API i automatyzacji. Piszę odporne integracje (walidacja, retry, logowanie), te nudne, ale krytyczne części, które sprawiają, że automatyzacje agencji nie padają po cichu. Działający proof-of-concept dostępny na życzenie; przykładowy kod w tym repozytorium.
 
 **Następny krok:** napiszcie w jednym–dwóch zdaniach, jakiej integracji potrzebujecie i jakie dwa systemy są w grze. Odpowiem pisemnie zakresem, ceną fixed lub estymacją godzin oraz terminem.
+
+---
+
+## Portfolio / Live code
+
+Working, open-source proof of the exact stack I use for agency work (FluxLab, https://fluxlab.pl):
+
+- GoHighLevel lead webhook and integrations: https://github.com/rodorn/fluxlab-ghl-integration
+- n8n lead-gen and scoring workflow: https://github.com/rodorn/fluxlab-n8n-lead-workflow
+- Listings API (FastAPI) built for RapidAPI: https://github.com/rodorn/fluxlab-listings-api
+
+Kod jest publiczny i uruchamialny, więc widzisz dokładnie jakość, zanim cokolwiek zlecisz.
