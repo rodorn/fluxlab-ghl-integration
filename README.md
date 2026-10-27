@@ -1,5 +1,7 @@
 # GHL Lead Integration (webhook -> Sheet + external API)
 
+> Automatic lead routing to your CRM, built to order: [fluxlab.pl/automatyzacja-leadow-crm](https://fluxlab.pl/automatyzacja-leadow-crm?utm_source=github&utm_campaign=fluxlab-ghl-integration)
+
 A small, production-shaped FastAPI service that receives a **GoHighLevel (GHL)
 new-lead webhook**, validates and normalizes it, stores it through a pluggable
 storage layer, and forwards it to any external API with retry/timeout/logging.
